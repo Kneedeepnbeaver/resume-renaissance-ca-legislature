@@ -1,0 +1,13 @@
+Workspace Manager (Workspace_Manager/) — resume-ready
+
+- Built a modular Workspace Manager platform with a widget/plugin architecture for productivity and content workflows (writing, file management, planning, etc.).
+- Designed system documentation covering architecture, security model, IPC/API contracts, state persistence, theming, and widget development to support maintainability and onboarding.
+- Integrated AI-assisted features (local-first/Ollama-oriented workflows) and operational tooling for diagnostics and configuration.
+
+
+C.A.P.I.T.O.L. (Legislative_Analysis/) — resume-ready
+
+- Developed C.A.P.I.T.O.L. (Civic Artificial Programming & Intelligence for Tracking, Organizing & Lawmaking), a local-first legislative analysis application using RAG over bill/policy documents.
+- Implemented document import → chunk/index → retrieval → analysis workflows and delivered a desktop UI (Electron/React) paired with a Python backend.
+- Produced release-quality documentation (quick start, features, FAQ, install/unquarantine guides) to support real-world distribution and user onboarding.
+

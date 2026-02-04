@@ -9,6 +9,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 import re
+from datetime import date
 
 from app.config import (
     SOURCES_DIR,
@@ -35,6 +36,7 @@ from app.generation import (
     load_history,
 )
 from app.utils.contact import load_contact_config, save_contact_config, parse_vcard
+from app.utils.html_export import md_to_html
 
 
 def extract_contact_info(job_description: str) -> dict:
@@ -262,7 +264,9 @@ def main():
     chunk_count = vector_store.count()
 
     # Tabs
-    tab_ingest, tab_resume, tab_letter = st.tabs(["📥 Ingest Documents", "📄 Resume", "✉️ Cover Letter"])
+    tab_ingest, tab_resume, tab_letter, tab_css_editor = st.tabs(
+        ["📥 Ingest Documents", "📄 Resume", "✉️ Cover Letter", "🎨 CSS Editor"]
+    )
 
     # ============ INGEST TAB ============
     with tab_ingest:
@@ -561,6 +565,133 @@ def main():
                                 st.rerun()
                         else:
                             st.caption("(deleted)")
+
+    # ============ CSS EDITOR TAB ============
+    with tab_css_editor:
+        st.subheader("MD → HTML → PDF")
+        st.caption(
+            "Turn Markdown into styled HTML with hardcoded CA Legislature theme. "
+            "Edit the Markdown below, preview, then save as HTML (print to PDF from your browser)."
+        )
+
+        # MD source: generated folder (reliable), session resume/letter, upload, or paste
+        st.write("**Markdown source**")
+        md_source = st.radio(
+            "Source",
+            [
+                "Load from generated folder",
+                "Use generated resume (from Resume tab)",
+                "Use generated cover letter (from Cover Letter tab)",
+                "Upload .md or .txt file",
+                "Paste / edit below",
+            ],
+            key="css_editor_source",
+        )
+
+        md_content = ""
+        selected_from_folder = ""
+
+        if md_source == "Load from generated folder":
+            # List .md and .txt files, newest first
+            gen_files = sorted(
+                [f for f in outputs_dir.glob("*") if f.suffix.lower() in (".md", ".txt") and f.name != "history.json"],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if gen_files:
+                file_options = [""] + [f.name for f in gen_files]
+                selected_from_folder = st.selectbox(
+                    "Choose file",
+                    options=file_options,
+                    format_func=lambda x: "(Select a file)" if x == "" else x,
+                    key="css_editor_file_select",
+                )
+                if selected_from_folder:
+                    try:
+                        md_content = (outputs_dir / selected_from_folder).read_text(encoding="utf-8")
+                        st.success(f"Loaded **{selected_from_folder}**")
+                    except Exception as e:
+                        st.error(f"Could not read file: {e}")
+            else:
+                st.warning("No .md or .txt files in generated folder. Generate a resume or cover letter first.")
+
+        elif md_source == "Use generated resume (from Resume tab)":
+            md_content = st.session_state.get("resume_display") or st.session_state.get("generated_resume") or ""
+            if not md_content:
+                st.warning("No generated resume. Go to **Resume** tab and generate one first, or **Load from generated folder**.")
+        elif md_source == "Use generated cover letter (from Cover Letter tab)":
+            md_content = st.session_state.get("letter_display") or st.session_state.get("generated_letter") or ""
+            if not md_content:
+                st.warning("No generated cover letter. Go to **Cover Letter** tab and generate one first, or **Load from generated folder**.")
+        elif md_source == "Upload .md or .txt file":
+            uploaded_md = st.file_uploader(
+                "Upload Markdown or text file",
+                type=["md", "txt", "markdown"],
+                key="css_editor_upload",
+            )
+            if uploaded_md:
+                md_content = uploaded_md.getvalue().decode("utf-8", errors="replace")
+                st.success(f"Loaded {uploaded_md.name}")
+
+        # Persist editor content when source changes
+        source_key = f"{md_source}:{selected_from_folder}" if md_source == "Load from generated folder" else md_source
+        if "css_editor_last_source" not in st.session_state:
+            st.session_state.css_editor_last_source = None
+        if st.session_state.css_editor_last_source != source_key:
+            st.session_state.css_editor_last_source = source_key
+            st.session_state.css_editor_md = md_content
+            # Reset doc title when loading new file
+            if md_source == "Load from generated folder" and selected_from_folder:
+                stem = Path(selected_from_folder).stem.lower()
+                st.session_state.css_editor_title = "Resume" if "resume" in stem else "Cover Letter" if "cover" in stem or "letter" in stem else stem.split("-")[0].title()
+            elif "resume" in md_source.lower():
+                st.session_state.css_editor_title = "Resume"
+            elif "letter" in md_source.lower():
+                st.session_state.css_editor_title = "Cover Letter"
+            else:
+                st.session_state.css_editor_title = "Document"
+
+        # Editable text area (always show when we have content or when paste/edit selected)
+        if md_source == "Paste / edit below" or md_content:
+            doc_title = st.text_input(
+                "Document title (for HTML <title>)",
+                value=st.session_state.get("css_editor_title", "Document"),
+                key="css_editor_title",
+            )
+            edited_md = st.text_area(
+                "Markdown (edit here)",
+                value=st.session_state.get("css_editor_md", md_content),
+                height=300,
+                key="css_editor_md",
+            )
+
+            if edited_md.strip():
+                html_output = md_to_html(edited_md.strip(), title=doc_title or "Document")
+
+                st.divider()
+                st.write("**Preview**")
+                st.components.v1.html(html_output, height=500, scrolling=True)
+
+                st.divider()
+                col1, col2, col3 = st.columns([1, 1, 2])
+                with col1:
+                    st.download_button(
+                        "Download HTML",
+                        html_output,
+                        file_name=f"{doc_title or 'document'}.html",
+                        mime="text/html",
+                        key="dl_css_editor_html",
+                    )
+                with col2:
+                    if st.button("Save HTML to generated folder", key="save_css_editor_html"):
+                        out_name = f"HTML-{doc_title or 'output'}-{date.today().strftime('%Y-%m-%d')}.html"
+                        out_path = outputs_dir / out_name
+                        out_path.write_text(html_output, encoding="utf-8")
+                        st.success(f"Saved to {out_path}")
+                with col3:
+                    st.caption("Open the HTML file in a browser and use File → Print → Save as PDF.")
+        else:
+            st.info("Select a source above or choose **Paste / edit below** to enter Markdown.")
 
 
 if __name__ == "__main__":
